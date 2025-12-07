@@ -315,6 +315,21 @@ async function getChallengeResponse(refreshToken: string) {
 }
 
 /**
+ * 获取 X-DS-Pow-Response
+ */
+function generatePowResponse(challenge: any) {
+  const challengePow = {
+    algorithm: challenge.algorithm,
+    challenge: challenge.challenge,
+    salt: challenge.salt,
+    answer: challenge.answer,
+    signature: challenge.signature,
+    target_path: "/api/v0/chat/completion"
+  }
+  return Buffer.from(JSON.stringify(challengePow), "utf-8").toString("base64")
+}
+
+/**
  * 同步对话补全
  *
  * @param model 模型名称
@@ -352,7 +367,7 @@ async function createCompletion(
     const isSearchModel = model.includes('search') || prompt.includes('联网搜索');
     const isThinkingModel = model.includes('think') || model.includes('r1') || prompt.includes('深度思考');
 
-    if(isSearchModel && isThinkingModel)
+    if (isSearchModel && isThinkingModel)
       throw new APIException(EX.API_REQUEST_FAILED, '深度思考和联网搜索不能同时使用');
 
     if (isThinkingModel) {
@@ -363,11 +378,11 @@ async function createCompletion(
     }
 
     let challenge;
-    if (isSearchModel || isThinkingModel) {
-      const challengeResponse = await getChallengeResponse(refreshToken);
-      challenge = await answerChallenge(challengeResponse);
-      logger.info(`插冷鸡: ${JSON.stringify(challenge)}`);
-    }
+    // if (isSearchModel || isThinkingModel) {
+    const challengeResponse = await getChallengeResponse(refreshToken);
+    challenge = await answerChallenge(challengeResponse);
+    logger.info(`插冷鸡: ${JSON.stringify(challenge)}`);
+    // }
 
     const result = await axios.post(
       "https://chat.deepseek.com/api/v0/chat/completion",
@@ -384,7 +399,8 @@ async function createCompletion(
         headers: {
           Authorization: `Bearer ${token}`,
           ...FAKE_HEADERS,
-          Cookie: generateCookie()
+          Cookie: generateCookie(),
+          "X-DS-Pow-Response": generatePowResponse(challenge)
         },
         // 120秒超时
         timeout: 120000,
@@ -464,7 +480,7 @@ async function createCompletionStream(
     const isSearchModel = model.includes('search') || prompt.includes('联网搜索');
     const isThinkingModel = model.includes('think') || model.includes('r1') || prompt.includes('深度思考');
 
-    if(isSearchModel && isThinkingModel)
+    if (isSearchModel && isThinkingModel)
       throw new APIException(EX.API_REQUEST_FAILED, '深度思考和联网搜索不能同时使用');
 
     if (isThinkingModel) {
@@ -501,7 +517,8 @@ async function createCompletionStream(
         headers: {
           Authorization: `Bearer ${token}`,
           ...FAKE_HEADERS,
-          Cookie: generateCookie()
+          Cookie: generateCookie(),
+          "X-Ds-Pow-Response": generatePowResponse(challenge)
         },
         // 120秒超时
         timeout: 120000,

@@ -87,6 +87,80 @@ async function getIPAddress() {
   return ip;
 }
 
+async function login(refreshToken: string) {
+  const [email, password] = refreshToken.split(':', 2);
+  const payload = {
+    email,
+    mobile: "",
+    password,
+    area_code: "",
+    device_id: "BX9xpXNNAkNGj7D7NcxW64hCYxYHhig08j+c/DJNMl+36kUuXPlaPV/v5i3fo2lMdyC7J3/TBdWPLDtXuUUMlNA==",
+    os: "web"
+  };
+  const response = await axios.post('https://chat.deepseek.com/api/v0/users/login', payload, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...FAKE_HEADERS
+    },
+    validateStatus: () => true
+  });
+  const { data } = response;
+  if (!data || data.code !== 0) {
+    throw new APIException(EX.API_REQUEST_FAILED, `Login failed: ${data?.msg || response.statusText}`);
+  }
+  const token = data?.data?.biz_data?.user?.token;
+  if (!token) {
+    throw new APIException(EX.API_REQUEST_FAILED, `Login failed: No token in response`);
+  }
+  return token;
+}
+
+async function ensureToken(refreshToken: string) {
+  if (!refreshToken.includes(':')) return refreshToken;
+
+  if (accessTokenRequestQueueMap[refreshToken]) {
+    const result: any = await new Promise((resolve) =>
+      accessTokenRequestQueueMap[refreshToken].push(resolve)
+    );
+    if (_.isError(result)) throw result;
+    return result.accessToken;
+  }
+
+  const cache = accessTokenMap.get(refreshToken);
+  if (cache && util.unixTimestamp() <= cache.refreshTime) {
+    return cache.accessToken;
+  }
+
+  accessTokenRequestQueueMap[refreshToken] = [];
+
+  try {
+    const token = await login(refreshToken);
+    const tokenInfo = {
+      accessToken: token,
+      refreshToken: refreshToken,
+      refreshTime: util.unixTimestamp() + ACCESS_TOKEN_EXPIRES,
+    };
+    accessTokenMap.set(refreshToken, tokenInfo);
+    accessTokenMap.set(token, {
+      accessToken: token,
+      refreshToken: token,
+      refreshTime: util.unixTimestamp() + ACCESS_TOKEN_EXPIRES,
+    });
+
+    if (accessTokenRequestQueueMap[refreshToken]) {
+      accessTokenRequestQueueMap[refreshToken].forEach((resolve) => resolve(tokenInfo));
+      delete accessTokenRequestQueueMap[refreshToken];
+    }
+    return token;
+  } catch (err) {
+    if (accessTokenRequestQueueMap[refreshToken]) {
+      accessTokenRequestQueueMap[refreshToken].forEach((resolve) => resolve(err));
+      delete accessTokenRequestQueueMap[refreshToken];
+    }
+    throw err;
+  }
+}
+
 /**
  * 请求access_token
  *
@@ -102,38 +176,6 @@ async function requestToken(refreshToken: string) {
   accessTokenRequestQueueMap[refreshToken] = [];
   logger.info(`Refresh token: ${refreshToken}`);
   const result = await (async () => {
-    if (refreshToken.includes(':')) {
-      const [email, password] = refreshToken.split(':', 2);
-      const payload = {
-        email,
-        mobile: "",
-        password,
-        area_code: "",
-        device_id: "BX9xpXNNAkNGj7D7NcxW64hCYxYHhig08j+c/DJNMl+36kUuXPlaPV/v5i3fo2lMdyC7J3/TBdWPLDtXuUUMlNA==",
-        os: "web"
-      };
-      const response = await axios.post('https://chat.deepseek.com/api/v0/users/login', payload, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...FAKE_HEADERS
-        },
-        validateStatus: () => true
-      });
-      const { data } = response;
-      if (!data || data.code !== 0) {
-        throw new APIException(EX.API_REQUEST_FAILED, `Login failed: ${data?.msg || response.statusText}`);
-      }
-      const token = data?.data?.biz_data?.user?.token;
-      if (!token) {
-        throw new APIException(EX.API_REQUEST_FAILED, `Login failed: No token in response`);
-      }
-      return {
-        accessToken: token,
-        refreshToken: refreshToken,
-        refreshTime: util.unixTimestamp() + ACCESS_TOKEN_EXPIRES,
-      };
-    }
-
     const result = await axios.get(
       "https://chat.deepseek.com/api/v0/users/current",
       {
@@ -286,6 +328,7 @@ async function createCompletion(
 ) {
   return (async () => {
     logger.info(messages);
+    refreshToken = await ensureToken(refreshToken);
 
     // 如果引用对话ID不正确则重置引用
     if (!/[0-9a-z\-]{36}@[0-9]+/.test(refConvId))
@@ -402,6 +445,7 @@ async function createCompletionStream(
 ) {
   return (async () => {
     logger.info(messages);
+    refreshToken = await ensureToken(refreshToken);
 
     // 如果引用对话ID不正确则重置引用
     if (!/[0-9a-z\-]{36}@[0-9]+/.test(refConvId))

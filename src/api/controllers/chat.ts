@@ -39,7 +39,11 @@ const FAKE_HEADERS = {
   "Sec-Fetch-Site": "same-origin",
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-  "X-App-Version": "20241018.0"
+  "X-App-Version": "20241129.1",
+  "X-Client-Platform": "web",
+  "X-Client-Version": "1.5.0",
+  "X-Debug-Lite-Model-Channel": "default",
+  "X-Debug-Model-Channel": "default"
 };
 const EVENT_COMMIT_ID = '41e9c7b1';
 // 当前IP地址
